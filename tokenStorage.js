@@ -4,12 +4,18 @@ const crypto = require('crypto');
 
 class SecureTokenStorage {
   constructor(encryptionKey, filePath = './tokens.encrypted.json') {
-    this.encryptionKey = encryptionKey || this.generateEncryptionKey();
     this.filePath = filePath;
     
-    // Ensure the encryption key is at least 32 bytes for AES-256
-    if (this.encryptionKey.length < 32) {
-      this.encryptionKey = crypto.scryptSync(this.encryptionKey, 'salt', 32).toString('hex');
+    // Derive a consistent 32-byte key from the encryption key
+    if (encryptionKey) {
+      // Use scrypt to derive a consistent 32-byte key from the provided key
+      // Using a fixed salt ensures the same input key always produces the same output key
+      this.encryptionKey = crypto.scryptSync(encryptionKey, 'tiktok-oauth2-salt', 32);
+    } else {
+      // If no key provided, we need to generate one and store it
+      // But this means tokens won't persist across restarts without a key
+      console.warn('⚠️  No ENCRYPTION_KEY provided. Tokens will not persist across server restarts.');
+      this.encryptionKey = crypto.randomBytes(32);
     }
   }
 
@@ -20,8 +26,8 @@ class SecureTokenStorage {
 
   // Encrypt data
   encrypt(data) {
-    const iv = crypto.randomBytes(16);
-    const cipher = crypto.createCipher('aes-256-cbc', this.encryptionKey);
+    const iv = crypto.randomBytes(16); // 16 bytes for AES-256-CBC
+    const cipher = crypto.createCipheriv('aes-256-cbc', this.encryptionKey, iv);
     
     let encrypted = cipher.update(JSON.stringify(data), 'utf8', 'hex');
     encrypted += cipher.final('hex');
@@ -35,14 +41,30 @@ class SecureTokenStorage {
   // Decrypt data
   decrypt(encryptedData) {
     try {
-      const decipher = crypto.createDecipher('aes-256-cbc', this.encryptionKey);
+      // Validate encrypted data structure
+      if (!encryptedData || !encryptedData.iv || !encryptedData.encrypted) {
+        console.error('Invalid encrypted data structure');
+        return null;
+      }
+
+      const iv = Buffer.from(encryptedData.iv, 'hex');
+      const decipher = crypto.createDecipheriv('aes-256-cbc', this.encryptionKey, iv);
       
       let decrypted = decipher.update(encryptedData.encrypted, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
       
       return JSON.parse(decrypted);
     } catch (error) {
-      console.error('Decryption failed:', error.message);
+      // Provide more helpful error messages
+      if (error.message.includes('bad decrypt') || error.message.includes('bad decryption')) {
+        console.error('❌ Decryption failed: Invalid encryption key or corrupted data.');
+        console.error('   This usually means:');
+        console.error('   1. ENCRYPTION_KEY changed since tokens were encrypted, OR');
+        console.error('   2. Tokens were encrypted with old/different encryption method');
+        console.error('   Solution: Delete tokens.encrypted.json and re-authenticate');
+      } else {
+        console.error('Decryption failed:', error.message);
+      }
       return null;
     }
   }

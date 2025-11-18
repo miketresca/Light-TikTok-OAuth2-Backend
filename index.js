@@ -83,7 +83,7 @@ app.get('/auth/login', (req, res) => {
     client_key: process.env.TIKTOK_CLIENT_KEY,
     redirect_uri: process.env.TIKTOK_REDIRECT_URI,
     response_type: 'code',
-    scope: 'user.info.basic,user.info.profile,user.info.stats,video.publish,video.upload',
+    scope: 'user.info.basic,user.info.profile,user.info.stats,video.upload',
     state: 'secureRandomState123', // optional
     code_challenge: pkce.challenge,
     code_challenge_method: 'S256'
